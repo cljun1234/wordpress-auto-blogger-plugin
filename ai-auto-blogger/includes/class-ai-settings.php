@@ -11,39 +11,18 @@ class AAB_Settings {
 	}
 
 	public function add_plugin_page() {
-		add_menu_page(
-			'AI Auto Blogger',
-			'AI Auto Blogger',
-			'manage_options',
-			'ai-auto-blogger',
-			array( $this, 'create_admin_page' ),
-			'dashicons-edit',
-			20
-		);
+        // We do NOT add the main menu page here anymore.
+        // It is handled by AAB_Generator_UI to ensure the Generator is the main view.
 
-        // Add submenus
+        // Add Settings as a submenu
         add_submenu_page(
-            'ai-auto-blogger',
+            'ai-auto-blogger', // Parent slug (registered by Generator UI)
             'Settings',
             'Settings',
             'manage_options',
             'ai-auto-blogger-settings',
             array( $this, 'create_settings_page' )
         );
-	}
-
-    // Main dashboard redirect or content (will be overridden by Generator UI usually, but let's keep a dashboard landing)
-	public function create_admin_page() {
-        // For now, redirect to Generator if accessed directly, or just show a welcome.
-        // We'll let the Generator UI handle the main 'ai-auto-blogger' slug content later if needed.
-        // Actually, let's make the "Generator" the main page, and "Settings" a submenu.
-        // For this step, I'll just render a placeholder.
-        ?>
-        <div class="wrap">
-            <h1>AI Auto Blogger</h1>
-            <p>Welcome. Please configure your API keys in the <a href="<?php echo admin_url('admin.php?page=ai-auto-blogger-settings'); ?>">Settings</a> page.</p>
-        </div>
-        <?php
 	}
 
 	public function create_settings_page() {

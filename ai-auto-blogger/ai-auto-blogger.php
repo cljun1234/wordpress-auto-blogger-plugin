@@ -33,9 +33,12 @@ require_once AAB_PATH . 'includes/api/class-deepseek.php';
 
 // Initialize Plugin
 function aab_init() {
+    // Instantiate Generator UI FIRST so it registers the main menu 'ai-auto-blogger'
+    new AAB_Generator_UI();
+
+    // Then instantiate Settings (submenus) and Templates
 	new AAB_Settings();
 	new AAB_Templates();
-	new AAB_Generator_UI();
 	new AAB_Engine();
 }
 add_action( 'plugins_loaded', 'aab_init' );
