@@ -6,7 +6,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 class AAB_Generator_UI {
 
     public function __construct() {
-        add_action( 'admin_menu', array( $this, 'add_generator_page' ) );
+        // Priority 5 ensures this parent menu exists before CPTs try to attach submenus at priority 10
+        add_action( 'admin_menu', array( $this, 'add_generator_page' ), 5 );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
     }
 
