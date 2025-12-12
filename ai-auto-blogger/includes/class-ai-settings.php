@@ -77,6 +77,37 @@ class AAB_Settings {
 			'ai-auto-blogger-settings',
 			'setting_section_id'
 		);
+
+        add_settings_section(
+			'image_setting_section_id', // ID
+			'Image Provider Configuration', // Title
+			array( $this, 'print_image_section_info' ), // Callback
+			'ai-auto-blogger-settings' // Page
+		);
+
+        add_settings_field(
+			'unsplash_access_key',
+			'Unsplash Access Key',
+			array( $this, 'unsplash_callback' ),
+			'ai-auto-blogger-settings',
+			'image_setting_section_id'
+		);
+
+        add_settings_field(
+			'pexels_api_key',
+			'Pexels API Key',
+			array( $this, 'pexels_callback' ),
+			'ai-auto-blogger-settings',
+			'image_setting_section_id'
+		);
+
+        add_settings_field(
+			'pixabay_api_key',
+			'Pixabay API Key',
+			array( $this, 'pixabay_callback' ),
+			'ai-auto-blogger-settings',
+			'image_setting_section_id'
+		);
 	}
 
 	public function sanitize( $input ) {
@@ -87,12 +118,22 @@ class AAB_Settings {
 			$new_input['gemini_api_key'] = sanitize_text_field( $input['gemini_api_key'] );
         if( isset( $input['deepseek_api_key'] ) )
 			$new_input['deepseek_api_key'] = sanitize_text_field( $input['deepseek_api_key'] );
+        if( isset( $input['unsplash_access_key'] ) )
+            $new_input['unsplash_access_key'] = sanitize_text_field( $input['unsplash_access_key'] );
+        if( isset( $input['pexels_api_key'] ) )
+            $new_input['pexels_api_key'] = sanitize_text_field( $input['pexels_api_key'] );
+        if( isset( $input['pixabay_api_key'] ) )
+            $new_input['pixabay_api_key'] = sanitize_text_field( $input['pixabay_api_key'] );
 
 		return $new_input;
 	}
 
 	public function print_section_info() {
 		print 'Enter your API keys below:';
+	}
+
+    public function print_image_section_info() {
+		print 'Enter your Stock Photo Provider API keys below:';
 	}
 
 	public function openai_callback() {
@@ -118,6 +159,33 @@ class AAB_Settings {
         $val = isset( $options['deepseek_api_key'] ) ? $options['deepseek_api_key'] : '';
 		printf(
 			'<input type="password" id="deepseek_api_key" name="aab_settings[deepseek_api_key]" value="%s" class="regular-text" />',
+			esc_attr( $val )
+		);
+	}
+
+    public function unsplash_callback() {
+		$options = get_option( 'aab_settings' );
+        $val = isset( $options['unsplash_access_key'] ) ? $options['unsplash_access_key'] : '';
+		printf(
+			'<input type="password" id="unsplash_access_key" name="aab_settings[unsplash_access_key]" value="%s" class="regular-text" />',
+			esc_attr( $val )
+		);
+	}
+
+    public function pexels_callback() {
+		$options = get_option( 'aab_settings' );
+        $val = isset( $options['pexels_api_key'] ) ? $options['pexels_api_key'] : '';
+		printf(
+			'<input type="password" id="pexels_api_key" name="aab_settings[pexels_api_key]" value="%s" class="regular-text" />',
+			esc_attr( $val )
+		);
+	}
+
+    public function pixabay_callback() {
+		$options = get_option( 'aab_settings' );
+        $val = isset( $options['pixabay_api_key'] ) ? $options['pixabay_api_key'] : '';
+		printf(
+			'<input type="password" id="pixabay_api_key" name="aab_settings[pixabay_api_key]" value="%s" class="regular-text" />',
 			esc_attr( $val )
 		);
 	}

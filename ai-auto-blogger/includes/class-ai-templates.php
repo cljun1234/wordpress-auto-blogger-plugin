@@ -71,6 +71,10 @@ class AAB_Templates {
             'avoid_words' => '',
             'internal_links' => '',
             'external_links' => 'authority_only',
+            'image_provider' => 'none',
+            'image_count' => 3,
+            'image_featured' => 'on',
+            'image_credits' => 'on',
         );
 
         $data = wp_parse_args( $values, $defaults );
@@ -161,6 +165,34 @@ class AAB_Templates {
              <div class="aab-row">
                 <label>Internal Link Targets (URL per line, AI will try to match context)</label>
                 <textarea name="aab_data[internal_links]" rows="3"><?php echo esc_textarea( $data['internal_links'] ); ?></textarea>
+            </div>
+
+            <!-- Image Settings -->
+            <h3>6. Image Settings</h3>
+            <div class="aab-row">
+                <label>Image Provider</label>
+                <select name="aab_data[image_provider]">
+                    <option value="none" <?php selected( $data['image_provider'], 'none' ); ?>>None</option>
+                    <option value="unsplash" <?php selected( $data['image_provider'], 'unsplash' ); ?>>Unsplash</option>
+                    <option value="pexels" <?php selected( $data['image_provider'], 'pexels' ); ?>>Pexels</option>
+                    <option value="pixabay" <?php selected( $data['image_provider'], 'pixabay' ); ?>>Pixabay</option>
+                </select>
+            </div>
+            <div class="aab-row">
+                <label>Number of Images</label>
+                <input type="number" name="aab_data[image_count]" value="<?php echo esc_attr( $data['image_count'] ); ?>" style="width: 80px;" min="0" max="10" />
+            </div>
+            <div class="aab-row">
+                <label>
+                    <input type="checkbox" name="aab_data[image_featured]" <?php checked( $data['image_featured'], 'on' ); ?> />
+                    Set first image as Featured Image
+                </label>
+            </div>
+            <div class="aab-row">
+                <label>
+                    <input type="checkbox" name="aab_data[image_credits]" <?php checked( $data['image_credits'], 'on' ); ?> />
+                    Add image credits/attribution
+                </label>
             </div>
 
         </div>
