@@ -30,6 +30,9 @@ require_once AAB_PATH . 'includes/api/class-openai.php';
 require_once AAB_PATH . 'includes/api/class-gemini.php';
 require_once AAB_PATH . 'includes/api/class-deepseek.php';
 
+// Include Image Factory
+require_once AAB_PATH . 'includes/class-ai-image-factory.php';
+
 
 // Initialize Plugin
 function aab_init() {
