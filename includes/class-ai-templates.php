@@ -71,6 +71,10 @@ class AAB_Templates {
             'avoid_words' => '',
             'internal_links' => '',
             'external_links' => 'authority_only',
+            'image_provider' => '',
+            'image_count' => 1,
+            'image_featured' => 'yes',
+            'image_attribution' => 'yes',
         );
 
         $data = wp_parse_args( $values, $defaults );
@@ -130,8 +134,37 @@ class AAB_Templates {
                 </select>
             </div>
 
+            <!-- Images -->
+            <h3>3. Images</h3>
+            <div class="aab-row">
+                <label>Image Provider</label>
+                <select name="aab_data[image_provider]">
+                    <option value="" <?php selected( $data['image_provider'], '' ); ?>>None</option>
+                    <option value="unsplash" <?php selected( $data['image_provider'], 'unsplash' ); ?>>Unsplash</option>
+                    <option value="pexels" <?php selected( $data['image_provider'], 'pexels' ); ?>>Pexels</option>
+                    <option value="pixabay" <?php selected( $data['image_provider'], 'pixabay' ); ?>>Pixabay</option>
+                </select>
+            </div>
+            <div class="aab-row">
+                <label>Number of Images</label>
+                <input type="number" name="aab_data[image_count]" value="<?php echo esc_attr( $data['image_count'] ); ?>" style="width: 80px;" />
+            </div>
+            <div class="aab-row">
+                <label>
+                    <input type="checkbox" name="aab_data[image_featured]" value="yes" <?php checked( $data['image_featured'], 'yes' ); ?> />
+                    Set first image as Featured Image
+                </label>
+            </div>
+            <div class="aab-row">
+                <label>
+                    <input type="checkbox" name="aab_data[image_attribution]" value="yes" <?php checked( $data['image_attribution'], 'yes' ); ?> />
+                    Add Attribution / Caption
+                </label>
+            </div>
+
+
             <!-- SEO Metadata -->
-            <h3>3. SEO Metadata</h3>
+            <h3>4. SEO Metadata</h3>
             <div class="aab-row">
                 <label>Meta Title Formula (Use {keyword}, {year})</label>
                 <input type="text" name="aab_data[title_formula]" value="<?php echo esc_attr( $data['title_formula'] ); ?>" />
@@ -142,7 +175,7 @@ class AAB_Templates {
             </div>
 
             <!-- Tone & Brand -->
-            <h3>4. Tone & Brand</h3>
+            <h3>5. Tone & Brand</h3>
             <div class="aab-row">
                 <label>Tone of Voice</label>
                 <input type="text" name="aab_data[tone]" value="<?php echo esc_attr( $data['tone'] ); ?>" placeholder="e.g. Professional, Friendly, Witty" />
@@ -157,7 +190,7 @@ class AAB_Templates {
             </div>
 
             <!-- Internal Links -->
-             <h3>5. Linking</h3>
+             <h3>6. Linking</h3>
              <div class="aab-row">
                 <label>Internal Link Targets (URL per line, AI will try to match context)</label>
                 <textarea name="aab_data[internal_links]" rows="3"><?php echo esc_textarea( $data['internal_links'] ); ?></textarea>
@@ -184,6 +217,11 @@ class AAB_Templates {
         if ( isset( $_POST['aab_data'] ) ) {
             // Sanitize array
             $data = array_map( 'sanitize_textarea_field', $_POST['aab_data'] );
+
+            // Checkbox handling (if unchecked, they won't be in POST, so we need to handle that)
+            if ( ! isset( $data['image_featured'] ) ) $data['image_featured'] = 'no';
+            if ( ! isset( $data['image_attribution'] ) ) $data['image_attribution'] = 'no';
+
             update_post_meta( $post_id, '_aab_template_data', $data );
         }
     }
