@@ -6,10 +6,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 class AAB_Engine {
 
     public function __construct() {
-        add_action( 'wp_ajax_aab_generate_post', array( $this, 'ajax_generate_post' ) );
+        add_action( 'wp_ajax_aab_generate_post', array( $this, 'handle_ajax_generate_post' ) );
     }
 
-    public function ajax_generate_post() {
+    /**
+     * AJAX Handler for manual generation.
+     */
+    public function handle_ajax_generate_post() {
         check_ajax_referer( 'aab_generate_nonce', 'security' );
 
         if ( ! current_user_can( 'edit_posts' ) ) {
@@ -25,10 +28,33 @@ class AAB_Engine {
             wp_send_json_error( 'Missing keyword or template.' );
         }
 
+        $result = $this->generate_post( $keyword, $template_id, $provider, $model );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message() );
+        }
+
+        wp_send_json_success( array(
+            'post_id' => $result,
+            'edit_url' => get_edit_post_link( $result, '' ),
+            'view_url' => get_permalink( $result )
+        ) );
+    }
+
+    /**
+     * Core generation logic. Can be called by AJAX or Scheduler.
+     *
+     * @param string $keyword
+     * @param int $template_id
+     * @param string $provider
+     * @param string $model
+     * @return int|WP_Error Post ID on success.
+     */
+    public function generate_post( $keyword, $template_id, $provider, $model ) {
         // 1. Fetch Template Data
         $template_data = get_post_meta( $template_id, '_aab_template_data', true );
         if ( ! $template_data ) {
-            wp_send_json_error( 'Invalid template data.' );
+            return new WP_Error( 'invalid_template', 'Invalid template data.' );
         }
 
         // 2. Construct Prompt
@@ -39,41 +65,37 @@ class AAB_Engine {
         try {
             $client = AAB_API_Factory::get_client( $provider );
             if ( is_wp_error( $client ) ) {
-                wp_send_json_error( $client->get_error_message() );
+                return $client;
             }
 
             $generated_content = $client->generate_content( $system_prompt, $user_prompt, $model );
 
             if ( is_wp_error( $generated_content ) ) {
-                wp_send_json_error( $generated_content->get_error_message() );
+                return $generated_content;
             }
 
             // 4. Create Post
             $post_id = $this->create_wordpress_post( $keyword, $generated_content, $template_data );
 
             if ( is_wp_error( $post_id ) ) {
-                 wp_send_json_error( $post_id->get_error_message() );
+                 return $post_id;
             }
 
             // LOGGING START
             AAB_Logger::log( $post_id, "Generated post for keyword: $keyword. Provider: $provider", 'info' );
             // LOGGING END
 
-            // 5. Process Images (New Feature)
+            // 5. Process Images
             $this->process_images( $post_id, $keyword, $generated_content, $template_data );
 
-            wp_send_json_success( array(
-                'post_id' => $post_id,
-                'edit_url' => get_edit_post_link( $post_id, '' ),
-                'view_url' => get_permalink( $post_id )
-            ) );
+            return $post_id;
 
         } catch ( Exception $e ) {
             // LOGGING ERROR
             if ( isset( $post_id ) && ! is_wp_error( $post_id ) ) {
                 AAB_Logger::log( $post_id, "Generation Exception: " . $e->getMessage(), 'error' );
             }
-            wp_send_json_error( $e->getMessage() );
+            return new WP_Error( 'exception', $e->getMessage() );
         }
     }
 
@@ -112,10 +134,13 @@ class AAB_Engine {
              $prompt .= "\n- Suggest placements for these internal links if relevant (format as <a href='URL'>Anchor</a>): \n" . $data['internal_links'];
         }
 
-        // Schema (Just instruction for now, as full JSON-LD is complex to inline in content usually handled by plugins)
+        // Schema
         if ( ! empty( $data['schema_type'] ) && $data['schema_type'] !== 'Article' ) {
             $prompt .= "\n- Structure the content to support " . $data['schema_type'] . " schema (e.g. if FAQ, use proper Q&A format).";
         }
+
+        // Tags Instruction
+        $prompt .= "\n\nIMPORTANT: At the very end of the content, strictly output a hidden HTML comment containing 3-5 relevant comma-separated tags like this: <!-- TAGS: Tag1, Tag2, Tag3 -->";
 
         $prompt .= "\n\nIMPORTANT: Return ONLY the raw HTML content for the body of the post. Do not include markdown code blocks (```html). Start directly with the <h1> tag.";
 
@@ -128,6 +153,15 @@ class AAB_Engine {
         $html_content = preg_replace( '/^```html/', '', $html_content );
         $html_content = preg_replace( '/```$/', '', $html_content );
         $html_content = trim( $html_content );
+
+        // Extract Tags
+        $tags_input = array();
+        if ( preg_match( '/<!-- TAGS:\s*(.*?)-->/i', $html_content, $tag_matches ) ) {
+            $tags_string = $tag_matches[1];
+            $tags_input = array_map( 'trim', explode( ',', $tags_string ) );
+            // Remove tags comment from content
+            $html_content = str_replace( $tag_matches[0], '', $html_content );
+        }
 
         // Extract H1 for Title
         $title = $keyword; // Default
@@ -169,17 +203,27 @@ class AAB_Engine {
             'post_type'     => 'post',
         );
 
+        // If running via Cron, current user might be 0. Set to admin (ID 1) or keep 0 (if valid).
+        if ( $post_arr['post_author'] == 0 ) {
+            $post_arr['post_author'] = 1;
+        }
+
         $post_id = wp_insert_post( $post_arr );
 
         if ( is_wp_error( $post_id ) ) {
             return $post_id;
         }
 
+        // Set Tags
+        if ( ! empty( $tags_input ) ) {
+            wp_set_post_tags( $post_id, $tags_input, false );
+        }
+
         // Save Custom Fields (SEO)
         update_post_meta( $post_id, '_ai_meta_description', $meta_desc );
         update_post_meta( $post_id, '_ai_generated_keyword', $keyword );
 
-        // If Yoast is active, try to save to Yoast fields
+        // If Yoast is active
         update_post_meta( $post_id, '_yoast_wpseo_title', $title );
         update_post_meta( $post_id, '_yoast_wpseo_metadesc', $meta_desc );
         update_post_meta( $post_id, '_yoast_wpseo_focuskw', $keyword );
@@ -342,11 +386,6 @@ class AAB_Engine {
                 $new_content .= "\n" . $insertion . "\n";
             }
         }
-
-        // If the original content didn't end with </p>, explode might have left the last chunk without it if it was empty,
-        // but if it had text, we added </p>.
-        // Ideally we should be more careful, but for AI generated HTML which is usually well-formed, this is okay.
-
         return $new_content;
     }
 }
