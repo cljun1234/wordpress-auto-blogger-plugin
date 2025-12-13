@@ -42,6 +42,10 @@ jQuery(document).ready(function($) {
         var provider = $('#aab_sched_provider').val();
         var model = $('#aab_sched_model').val();
 
+        // Grab new inputs
+        var count = $('#aab_gen_count').val();
+        var days = $('#aab_gen_days').val();
+
         if ( ! broad_topic ) {
             alert('Please enter a Broad Topic first.');
             return;
@@ -60,7 +64,9 @@ jQuery(document).ready(function($) {
             security: aab_vars.nonce,
             broad_topic: broad_topic,
             provider: provider,
-            model: model
+            model: model,
+            count: count,
+            days: days
         }, function(response) {
             $btn.prop('disabled', false);
             $spinner.removeClass('is-active');

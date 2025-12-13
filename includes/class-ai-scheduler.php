@@ -205,6 +205,10 @@ class AAB_Scheduler {
         ?>
         <div id="aab-queue-container">
             <p>
+                <label>Number of Ideas to Generate: <input type="number" id="aab_gen_count" value="10" style="width:60px;"></label>
+                <label style="margin-left:15px;">Check Duplicates from Last (Days): <input type="number" id="aab_gen_days" value="30" style="width:60px;"></label>
+            </p>
+            <p>
                 <button type="button" id="aab-generate-topics-btn" class="button button-secondary">Generate Topics Idea</button>
                 <span class="spinner" style="float:none;"></span>
                 <span id="aab-topic-msg" style="margin-left:10px;"></span>
@@ -314,28 +318,47 @@ class AAB_Scheduler {
         $broad_topic = sanitize_text_field( $_POST['broad_topic'] );
         $provider = sanitize_text_field( $_POST['provider'] );
         $model = sanitize_text_field( $_POST['model'] );
+        $count = isset( $_POST['count'] ) ? intval( $_POST['count'] ) : 10;
+        $days = isset( $_POST['days'] ) ? intval( $_POST['days'] ) : 30;
+
+        // Limit defaults if crazy values
+        if ( $count < 1 ) $count = 10;
+        if ( $count > 50 ) $count = 50;
+        if ( $days < 1 ) $days = 30;
 
         if ( empty( $broad_topic ) ) {
             wp_send_json_error( 'Please save a Broad Topic first.' );
         }
 
-        // 1. Get History (Last 50 titles)
-        $recent_posts = get_posts( array(
-            'numberposts' => 50,
+        // 1. Get History (Filtered by date)
+        $args = array(
+            'numberposts' => -1, // Get all from that period to ensure no dupes
             'post_status' => 'publish',
-            'fields' => 'ids' // optimization
-        ) );
+            'fields' => 'ids',
+            'date_query' => array(
+                array(
+                    'after' => $days . ' days ago',
+                ),
+            ),
+        );
+
+        $recent_posts = get_posts( $args );
 
         $titles = array();
+        // Limit history size for prompt context window optimization
+        // If we have 500 posts in last 30 days, we might blow up the prompt.
+        // Let's take the most recent 50-100.
+        $recent_posts = array_slice( $recent_posts, 0, 100 );
+
         foreach ( $recent_posts as $pid ) {
             $titles[] = get_the_title( $pid );
         }
         $history_list = implode( "\n- ", $titles );
 
         // 2. Build Prompt
-        $prompt = "I need 10 blog post topic ideas for the niche: '$broad_topic'.\n";
-        $prompt .= "Here are the topics I have ALREADY covered (DO NOT REPEAT THESE):\n- $history_list\n\n";
-        $prompt .= "Generate 10 NEW, unique, click-worthy titles. Return ONLY the titles as a simple list (one per line). Do not number them.";
+        $prompt = "I need $count blog post topic ideas for the niche: '$broad_topic'.\n";
+        $prompt .= "Here are the topics I have ALREADY covered in the last $days days (DO NOT REPEAT THESE):\n- $history_list\n\n";
+        $prompt .= "Generate $count NEW, unique, click-worthy titles. Return ONLY the titles as a simple list (one per line). Do not number them.";
 
         // 3. Call API
          try {
@@ -363,6 +386,9 @@ class AAB_Scheduler {
                     $clean_lines[] = $l;
                 }
             }
+
+            // Slice to exact count requested if AI over-generated
+            $clean_lines = array_slice( $clean_lines, 0, $count );
 
             wp_send_json_success( $clean_lines );
 
