@@ -200,7 +200,6 @@ class AAB_Engine {
 
         // 1. Determine Search Queries
         // We need 1 for Featured (optional) + $count for body
-        // Body queries come from H2 tags
         $search_queries = array();
 
         // Featured Image Query (always main keyword)
@@ -209,8 +208,8 @@ class AAB_Engine {
         }
 
         // Body Image Queries
-        // Extract H2s
-        preg_match_all( '/<h2>(.*?)<\/h2>/i', $html_content, $matches );
+        // Extract H2s (robust regex handling attributes)
+        preg_match_all( '/<h2[^>]*>(.*?)<\/h2>/is', $html_content, $matches );
         $h2s = ! empty( $matches[1] ) ? $matches[1] : array();
 
         // If we have H2s, use them. If not, fallback to keyword variations
@@ -220,8 +219,6 @@ class AAB_Engine {
         }
 
         // 2. Fetch and Insert Images
-        // To avoid multiple insertions, we modify content in memory then update once.
-        // However, we need the CURRENT content from the post because create_wordpress_post strips H1.
         $post = get_post( $post_id );
         $current_content = $post->post_content;
 
@@ -247,7 +244,6 @@ class AAB_Engine {
             // Handle Featured Image
             if ( $item['type'] === 'featured' ) {
                 set_post_thumbnail( $post_id, $attach_id );
-                // Add attribution to caption if requested
                 if ( $add_attribution ) {
                     $caption = sprintf( 'Photo by <a href="%s" target="_blank" rel="nofollow">%s</a> on %s',
                         $img_data['photographer_url'],
@@ -279,36 +275,23 @@ class AAB_Engine {
                 $img_html .= '</figure><!-- /wp:image -->';
 
                 // Insert into content
-                // Strategy: Find the H2 used for query and insert AFTER it.
-                // If query was fallback, insert near end or evenly.
-                // Simple approach: Replace the H2 with H2 + Image
-                // We use the original query text to find the H2 again.
 
                 $h2_text = $item['query'];
                 // Escape regex characters in the query
                 $h2_safe = preg_quote( $h2_text, '/' );
 
-                // Try to find exact H2
-                $pattern = '/<h2>\s*' . $h2_safe . '\s*<\/h2>/i';
-                if ( preg_match( $pattern, $current_content ) ) {
-                     $current_content = preg_replace( $pattern, "<h2>$h2_text</h2>\n" . $img_html, $current_content, 1 );
+                // Try to find exact H2, allowing attributes
+                $pattern = '/<h2[^>]*>\s*' . $h2_safe . '\s*<\/h2>/i';
+
+                if ( preg_match( $pattern, $current_content, $match_arr ) ) {
+                     // Append image AFTER the found H2
+                     $replacement = $match_arr[0] . "\n" . $img_html;
+                     $current_content = preg_replace( $pattern, $replacement, $current_content, 1 );
                 } else {
-                    // Fallback: Append to content if not found (or if it was a keyword fallback)
-                    // Or improved fallback: Insert after the Nth paragraph?
-                    // Let's just append for now to be safe, or try to insert after a paragraph.
-                    // If we just append, it might bunch up at bottom.
-                    // Let's try to insert after the ($inserted_count + 1) * 2 paragraph.
-                    $paragraphs = explode( '</p>', $current_content );
+                    // Fallback: Insert after a specific paragraph number
+                    // Target: after ($inserted_count + 1) * 2 paragraph
                     $p_index = ( $inserted_count + 1 ) * 2;
-                    if ( isset( $paragraphs[ $p_index ] ) ) {
-                        $paragraphs[ $p_index ] .= '</p>' . $img_html;
-                        $current_content = implode( '', $paragraphs ); // Reassemble without adding extra </p> since we appended it
-                        // Wait, explode removes delimiter. We need to add it back.
-                        // Better:
-                        $current_content = $this->insert_after_paragraph( $img_html, $p_index, $current_content );
-                    } else {
-                        $current_content .= "\n" . $img_html;
-                    }
+                    $current_content = $this->insert_after_paragraph( $img_html, $p_index, $current_content );
                 }
 
                 $inserted_count++;
@@ -326,14 +309,21 @@ class AAB_Engine {
     private function insert_after_paragraph( $insertion, $paragraph_id, $content ) {
         $closing_p = '</p>';
         $paragraphs = explode( $closing_p, $content );
+        $new_content = '';
+
         foreach ( $paragraphs as $index => $paragraph ) {
             if ( trim( $paragraph ) ) {
-                $paragraphs[ $index ] .= $closing_p;
+                $new_content .= $paragraph . $closing_p;
             }
             if ( $paragraph_id == $index + 1 ) {
-                $paragraphs[ $index ] .= $insertion;
+                $new_content .= "\n" . $insertion . "\n";
             }
         }
-        return implode( '', $paragraphs );
+
+        // If the original content didn't end with </p>, explode might have left the last chunk without it if it was empty,
+        // but if it had text, we added </p>.
+        // Ideally we should be more careful, but for AI generated HTML which is usually well-formed, this is okay.
+
+        return $new_content;
     }
 }

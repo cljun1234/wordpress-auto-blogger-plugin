@@ -148,13 +148,17 @@ class AAB_Image_Factory {
             return $tmp;
         }
 
+        // Clean filename by stripping query strings
+        $clean_url = strtok( $url, '?' );
+        $filename = basename( $clean_url );
+
         $file_array = array(
-            'name' => basename( $url ),
+            'name' => $filename,
             'tmp_name' => $tmp
         );
 
         // Fix file extension if missing (API urls sometimes lack .jpg)
-        // Simple check: if name doesn't have extension, assume jpg or check mime
+        // Simple check: if name doesn't have extension, assume jpg
         if ( ! preg_match( '/\.[a-z0-9]{3,4}$/i', $file_array['name'] ) ) {
             $file_array['name'] .= '.jpg';
         }
