@@ -95,6 +95,23 @@ class AAB_Settings {
 			'image_api_section'
 		);
 
+        // Added Unsplash fields
+        add_settings_field(
+			'unsplash_app_id',
+			'Unsplash Application ID (Optional)',
+			array( $this, 'unsplash_app_id_callback' ),
+			'ai-auto-blogger-settings',
+			'image_api_section'
+		);
+
+        add_settings_field(
+			'unsplash_secret_key',
+			'Unsplash Secret Key (Optional)',
+			array( $this, 'unsplash_secret_key_callback' ),
+			'ai-auto-blogger-settings',
+			'image_api_section'
+		);
+
         add_settings_field(
 			'pexels_api_key',
 			'Pexels API Key',
@@ -123,6 +140,11 @@ class AAB_Settings {
 
         if( isset( $input['unsplash_access_key'] ) )
 			$new_input['unsplash_access_key'] = sanitize_text_field( $input['unsplash_access_key'] );
+        if( isset( $input['unsplash_app_id'] ) )
+			$new_input['unsplash_app_id'] = sanitize_text_field( $input['unsplash_app_id'] );
+        if( isset( $input['unsplash_secret_key'] ) )
+			$new_input['unsplash_secret_key'] = sanitize_text_field( $input['unsplash_secret_key'] );
+
         if( isset( $input['pexels_api_key'] ) )
 			$new_input['pexels_api_key'] = sanitize_text_field( $input['pexels_api_key'] );
         if( isset( $input['pixabay_api_key'] ) )
@@ -170,7 +192,26 @@ class AAB_Settings {
 		$options = get_option( 'aab_settings' );
         $val = isset( $options['unsplash_access_key'] ) ? $options['unsplash_access_key'] : '';
 		printf(
-			'<input type="password" id="unsplash_access_key" name="aab_settings[unsplash_access_key]" value="%s" class="regular-text" />',
+			'<input type="password" id="unsplash_access_key" name="aab_settings[unsplash_access_key]" value="%s" class="regular-text" />
+            <p class="description">Required for searching images.</p>',
+			esc_attr( $val )
+		);
+	}
+
+    public function unsplash_app_id_callback() {
+		$options = get_option( 'aab_settings' );
+        $val = isset( $options['unsplash_app_id'] ) ? $options['unsplash_app_id'] : '';
+		printf(
+			'<input type="text" id="unsplash_app_id" name="aab_settings[unsplash_app_id]" value="%s" class="regular-text" />',
+			esc_attr( $val )
+		);
+	}
+
+    public function unsplash_secret_key_callback() {
+		$options = get_option( 'aab_settings' );
+        $val = isset( $options['unsplash_secret_key'] ) ? $options['unsplash_secret_key'] : '';
+		printf(
+			'<input type="password" id="unsplash_secret_key" name="aab_settings[unsplash_secret_key]" value="%s" class="regular-text" />',
 			esc_attr( $val )
 		);
 	}

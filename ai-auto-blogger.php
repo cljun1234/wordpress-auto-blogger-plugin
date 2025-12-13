@@ -32,6 +32,7 @@ require_once AAB_PATH . 'includes/api/class-deepseek.php';
 
 // Include Image Factory
 require_once AAB_PATH . 'includes/class-ai-image-factory.php';
+require_once AAB_PATH . 'includes/class-ai-logger.php';
 
 
 // Initialize Plugin
@@ -42,6 +43,7 @@ function aab_init() {
     // Then instantiate Settings (submenus) and Templates
 	new AAB_Settings();
 	new AAB_Templates();
+	new AAB_Logger(); // Register Logger (Meta Box)
 	new AAB_Engine();
 }
 add_action( 'plugins_loaded', 'aab_init' );

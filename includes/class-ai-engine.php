@@ -55,6 +55,10 @@ class AAB_Engine {
                  wp_send_json_error( $post_id->get_error_message() );
             }
 
+            // LOGGING START
+            AAB_Logger::log( $post_id, "Generated post for keyword: $keyword. Provider: $provider", 'info' );
+            // LOGGING END
+
             // 5. Process Images (New Feature)
             $this->process_images( $post_id, $keyword, $generated_content, $template_data );
 
@@ -65,6 +69,10 @@ class AAB_Engine {
             ) );
 
         } catch ( Exception $e ) {
+            // LOGGING ERROR
+            if ( isset( $post_id ) && ! is_wp_error( $post_id ) ) {
+                AAB_Logger::log( $post_id, "Generation Exception: " . $e->getMessage(), 'error' );
+            }
             wp_send_json_error( $e->getMessage() );
         }
     }
@@ -198,6 +206,8 @@ class AAB_Engine {
         $set_featured = isset( $data['image_featured'] ) && $data['image_featured'] === 'yes';
         $add_attribution = isset( $data['image_attribution'] ) && $data['image_attribution'] === 'yes';
 
+        AAB_Logger::log( $post_id, "Starting image processing using provider: $provider. Target count: $count", 'info' );
+
         // 1. Determine Search Queries
         // We need 1 for Featured (optional) + $count for body
         $search_queries = array();
@@ -218,6 +228,8 @@ class AAB_Engine {
             $search_queries[] = array( 'type' => 'body', 'query' => $q );
         }
 
+        AAB_Logger::log( $post_id, "Generated search queries: " . json_encode( $search_queries ), 'info' );
+
         // 2. Fetch and Insert Images
         $post = get_post( $post_id );
         $current_content = $post->post_content;
@@ -228,7 +240,13 @@ class AAB_Engine {
             // Fetch 1 image for this query
             $images = AAB_Image_Factory::get_images( $provider, $item['query'], 1 );
 
-            if ( is_wp_error( $images ) || empty( $images ) ) {
+            if ( is_wp_error( $images ) ) {
+                AAB_Logger::log( $post_id, "Image fetch failed for query '{$item['query']}': " . $images->get_error_message(), 'error' );
+                continue;
+            }
+
+            if ( empty( $images ) ) {
+                AAB_Logger::log( $post_id, "No images found for query '{$item['query']}'", 'warning' );
                 continue;
             }
 
@@ -238,8 +256,11 @@ class AAB_Engine {
             $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
 
             if ( is_wp_error( $attach_id ) ) {
+                AAB_Logger::log( $post_id, "Sideload failed for url '{$img_data['url']}': " . $attach_id->get_error_message(), 'error' );
                 continue;
             }
+
+            AAB_Logger::log( $post_id, "Successfully sideloaded image ID: $attach_id for query: " . $item['query'], 'success' );
 
             // Handle Featured Image
             if ( $item['type'] === 'featured' ) {
@@ -304,6 +325,8 @@ class AAB_Engine {
             'post_content' => $current_content
         );
         wp_update_post( $update_args );
+
+        AAB_Logger::log( $post_id, "Image processing complete. Inserted $inserted_count body images.", 'success' );
     }
 
     private function insert_after_paragraph( $insertion, $paragraph_id, $content ) {
