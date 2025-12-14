@@ -62,6 +62,7 @@ class AAB_Templates {
             'min_words' => 1000,
             'max_words' => 2000,
             'headings' => "H1\nH2\nH3",
+            'structure_layout' => '',
             'schema_type' => 'Article',
             'title_formula' => '{keyword} - A Complete Guide',
             'meta_desc_formula' => 'Learn everything about {keyword} in this detailed guide.',
@@ -123,6 +124,19 @@ class AAB_Templates {
             <div class="aab-row">
                 <label>Required Headings (One per line)</label>
                 <textarea name="aab_data[headings]" rows="4"><?php echo esc_textarea( $data['headings'] ); ?></textarea>
+            </div>
+            <div class="aab-row">
+                <label>Custom Content Structure / Outline</label>
+                <textarea name="aab_data[structure_layout]" rows="8" placeholder="Define exact layout. Example:
+Featured Image
+Blog Title (H1)
+Introduction (100 words)
+Section Image
+Subheading (H2)
+Body Content (200 words)
+Section Image
+Conclusion"><?php echo esc_textarea( $data['structure_layout'] ); ?></textarea>
+                <p class="description">If set, AI will follow this exact structure. Use "Section Image" to place images.</p>
             </div>
             <div class="aab-row">
                 <label>Schema Markup Type</label>

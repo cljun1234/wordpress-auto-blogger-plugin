@@ -10,7 +10,14 @@ class AAB_Scheduler {
         add_action( 'add_meta_boxes', array( $this, 'add_meta_boxes' ) );
         add_action( 'save_post', array( $this, 'save_meta_boxes' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
-        add_action( 'admin_menu', array( $this, 'add_submenu' ) );
+
+        // Priority 11 should place it after Templates (default 10) but before Settings (which I will move to 20 or check)
+        // Actually, user wants Scheduler ABOVE Settings.
+        // Generator UI is top level.
+        // Let's register submenu with default priority but ensure Settings is registered *later* or with higher priority number in add_action.
+        // AAB_Settings adds its submenu on 'admin_menu' action with default priority 10.
+        // If I use priority 9 for Scheduler, it should come before Settings (10).
+        add_action( 'admin_menu', array( $this, 'add_submenu' ), 9 );
 
         // AJAX for Generating Topics
         add_action( 'wp_ajax_aab_generate_topics', array( $this, 'ajax_generate_topics' ) );
