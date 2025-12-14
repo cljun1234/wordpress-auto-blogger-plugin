@@ -139,6 +139,10 @@ class AAB_Engine {
             $prompt .= "\n- Structure the content to support " . $data['schema_type'] . " schema (e.g. if FAQ, use proper Q&A format).";
         }
 
+        // Image Query Instruction
+        $prompt .= "\n\nIMPORTANT: For every <h2> section, suggest a visual stock photo search query. Format it as a hidden comment right after the <h2> tag like this: <h2>Heading Text</h2> <!-- IMAGE_QUERY: A creative search term description -->";
+        $prompt .= "\nEnsure the search term is descriptive but simple (e.g. 'coding laptop neon light' instead of 'best laptop').";
+
         // Tags Instruction
         $prompt .= "\n\nIMPORTANT: At the very end of the content, strictly output a hidden HTML comment containing 3-5 relevant comma-separated tags like this: <!-- TAGS: Tag1, Tag2, Tag3 -->";
 
@@ -245,6 +249,15 @@ class AAB_Engine {
             return;
         }
 
+        // FIX: Fetch Cleaned Content from DB instead of using the raw $html_content from AI response.
+        // The raw $html_content contains H1 and Markdown which were stripped in create_wordpress_post.
+        // However, we instructed AI to put IMAGE_QUERY in comments. create_wordpress_post does NOT strip comments.
+        // So the cleaned content in DB *should* still have the comments.
+        $post = get_post( $post_id );
+        if ( ! $post ) return;
+
+        $current_content = $post->post_content;
+
         $provider = $data['image_provider'];
         $count = intval( $data['image_count'] );
         $set_featured = isset( $data['image_featured'] ) && $data['image_featured'] === 'yes';
@@ -252,9 +265,13 @@ class AAB_Engine {
 
         AAB_Logger::log( $post_id, "Starting image processing using provider: $provider. Target count: $count", 'info' );
 
-        // 1. Determine Search Queries
+        // 1. Determine Search Queries from Content Markers or Fallback
         // We need 1 for Featured (optional) + $count for body
         $search_queries = array();
+
+        // Extract H2s and adjacent comments
+        // Regex looks for <h2>...</h2> followed optionally by whitespace and <!-- IMAGE_QUERY: ... -->
+        preg_match_all( '/<h2[^>]*>(.*?)<\/h2>(?:\s*<!-- IMAGE_QUERY:\s*(.*?)-->)?/is', $current_content, $matches, PREG_SET_ORDER );
 
         // Featured Image Query (always main keyword)
         if ( ! has_post_thumbnail( $post_id ) && $set_featured ) {
@@ -262,27 +279,36 @@ class AAB_Engine {
         }
 
         // Body Image Queries
-        // Extract H2s (robust regex handling attributes)
-        preg_match_all( '/<h2[^>]*>(.*?)<\/h2>/is', $html_content, $matches );
-        $h2s = ! empty( $matches[1] ) ? $matches[1] : array();
-
-        // If we have H2s, use them. If not, fallback to keyword variations
         for ( $i = 0; $i < $count; $i++ ) {
-            $q = isset( $h2s[ $i ] ) ? strip_tags( $h2s[ $i ] ) : $keyword . ' ' . ( $i + 1 );
+            if ( isset( $matches[ $i ] ) ) {
+                // If AI provided a specific query, use it
+                if ( ! empty( $matches[ $i ][2] ) ) {
+                    $q = strip_tags( $matches[ $i ][2] );
+                    // Remove the comment from content (cleanup)
+                    // Note: We will do a global cleanup at the end, but we can also replace it here to ensure we don't match it again.
+                    // But since we are iterating, let's just collect the queries first.
+                } else {
+                    // Fallback to H2 text
+                    $q = strip_tags( $matches[ $i ][1] );
+                }
+            } else {
+                 $q = $keyword . ' ' . ( $i + 1 );
+            }
             $search_queries[] = array( 'type' => 'body', 'query' => $q );
         }
 
         AAB_Logger::log( $post_id, "Generated search queries: " . json_encode( $search_queries ), 'info' );
 
         // 2. Fetch and Insert Images
-        $post = get_post( $post_id );
-        $current_content = $post->post_content;
+
+        // Fetch exclusion list (used images)
+        $used_images = AAB_Image_Factory::get_used_images();
 
         $inserted_count = 0;
 
         foreach ( $search_queries as $index => $item ) {
-            // Fetch 1 image for this query
-            $images = AAB_Image_Factory::get_images( $provider, $item['query'], 1 );
+            // Fetch batch of images for this query, excluding used
+            $images = AAB_Image_Factory::get_images( $provider, $item['query'], 20, $used_images ); // Fetch 20 to find a unique one
 
             if ( is_wp_error( $images ) ) {
                 AAB_Logger::log( $post_id, "Image fetch failed for query '{$item['query']}': " . $images->get_error_message(), 'error' );
@@ -294,7 +320,12 @@ class AAB_Engine {
                 continue;
             }
 
+            // Pick the first one (factory logic now filters used ones, or gives random if all used)
             $img_data = $images[0];
+
+            // Mark as used
+            // We use URL or ID depending on provider. For now URL is safest unique identifier across providers without complex ID storage
+            AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
 
             // Sideload
             $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
@@ -342,26 +373,31 @@ class AAB_Engine {
                 // Insert into content
 
                 $h2_text = $item['query'];
-                // Escape regex characters in the query
-                $h2_safe = preg_quote( $h2_text, '/' );
+                // Since we might have replaced the comment, the query in $item might be different from H2 text if AI provided it.
+                // Re-find the H2.
 
-                // Try to find exact H2, allowing attributes
-                $pattern = '/<h2[^>]*>\s*' . $h2_safe . '\s*<\/h2>/i';
+                // Find all H2s again
+                 preg_match_all( '/<h2[^>]*>(.*?)<\/h2>/is', $current_content, $h2_matches, PREG_OFFSET_CAPTURE );
 
-                if ( preg_match( $pattern, $current_content, $match_arr ) ) {
-                     // Append image AFTER the found H2
-                     $replacement = $match_arr[0] . "\n" . $img_html;
-                     $current_content = preg_replace( $pattern, $replacement, $current_content, 1 );
-                } else {
-                    // Fallback: Insert after a specific paragraph number
-                    // Target: after ($inserted_count + 1) * 2 paragraph
+                 if ( isset( $h2_matches[0][$inserted_count] ) ) {
+                     // Insert after this H2
+                     $match_str = $h2_matches[0][$inserted_count][0];
+
+                     // Use specific replacement for Nth occurrence
+                     $current_content = $this->preg_replace_nth( '/<h2[^>]*>.*?<\/h2>/is', $match_str . "\n" . $img_html, $current_content, $inserted_count + 1 );
+
+                 } else {
+                    // Fallback
                     $p_index = ( $inserted_count + 1 ) * 2;
                     $current_content = $this->insert_after_paragraph( $img_html, $p_index, $current_content );
-                }
+                 }
 
                 $inserted_count++;
             }
         }
+
+        // Final Cleanup: Remove any remaining IMAGE_QUERY comments from $current_content
+        $current_content = preg_replace( '/<!-- IMAGE_QUERY:\s*(.*?)-->/i', '', $current_content );
 
         // Save updated content
         $update_args = array(
@@ -387,5 +423,13 @@ class AAB_Engine {
             }
         }
         return $new_content;
+    }
+
+    private function preg_replace_nth($pattern, $replacement, $subject, $nth=1) {
+        return preg_replace_callback($pattern, function($found) use (&$pattern, &$replacement, &$nth) {
+                $nth--;
+                if ($nth==0) return $replacement;
+                return reset($found);
+        }, $subject, -1, $count);
     }
 }

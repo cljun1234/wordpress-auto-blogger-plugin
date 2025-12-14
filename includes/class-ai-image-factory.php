@@ -11,30 +11,97 @@ class AAB_Image_Factory {
      * @param string $provider 'unsplash', 'pexels', 'pixabay'
      * @param string $query    Search query
      * @param int    $count    Number of images
+     * @param array  $exclude_urls Optional list of image URLs to exclude
      * @return array|WP_Error  Array of image data ['url', 'alt', 'photographer', 'photographer_url']
      */
-    public static function get_images( $provider, $query, $count = 1 ) {
+    public static function get_images( $provider, $query, $count = 1, $exclude_urls = array() ) {
         $settings = get_option( 'aab_settings' );
+
+        // If we have exclusion list, we need to fetch more images to be safe
+        $fetch_limit = ! empty( $exclude_urls ) ? max( 30, $count * 5 ) : $count;
 
         switch ( $provider ) {
             case 'unsplash':
                 $api_key = isset( $settings['unsplash_access_key'] ) ? $settings['unsplash_access_key'] : '';
-                return self::fetch_unsplash( $api_key, $query, $count );
+                $results = self::fetch_unsplash( $api_key, $query, $fetch_limit );
+                break;
             case 'pexels':
                 $api_key = isset( $settings['pexels_api_key'] ) ? $settings['pexels_api_key'] : '';
-                return self::fetch_pexels( $api_key, $query, $count );
+                $results = self::fetch_pexels( $api_key, $query, $fetch_limit );
+                break;
             case 'pixabay':
                 $api_key = isset( $settings['pixabay_api_key'] ) ? $settings['pixabay_api_key'] : '';
-                return self::fetch_pixabay( $api_key, $query, $count );
+                $results = self::fetch_pixabay( $api_key, $query, $fetch_limit );
+                break;
             default:
                 return new WP_Error( 'invalid_provider', 'Invalid image provider.' );
         }
+
+        if ( is_wp_error( $results ) ) {
+            return $results;
+        }
+
+        // Filter out excluded URLs
+        // Note: Comparing full URLs is strict. Some APIs rotate URLs or change tokens.
+        // Ideally we would use Image ID, but standardizing IDs across 3 APIs is complex for this factory.
+        // We will rely on URL string matching.
+        $filtered = array();
+        foreach ( $results as $img ) {
+            // Check against exclude list
+            if ( in_array( $img['url'], $exclude_urls ) ) {
+                continue;
+            }
+            $filtered[] = $img;
+        }
+
+        // If we filtered everything (unlikely with fetch_limit 30), fallback to original results shuffled
+        if ( empty( $filtered ) ) {
+            $filtered = $results;
+            shuffle( $filtered );
+        }
+
+        // Return just the requested count
+        return array_slice( $filtered, 0, $count );
+    }
+
+    /**
+     * Get list of recently used image URLs.
+     */
+    public static function get_used_images() {
+        // We store this in an option `_aab_used_images`
+        // It is a simple array of strings.
+        $used = get_option( '_aab_used_images', array() );
+        if ( ! is_array( $used ) ) $used = array();
+        return $used;
+    }
+
+    /**
+     * Mark an image URL as used.
+     */
+    public static function mark_image_as_used( $url ) {
+        $used = self::get_used_images();
+
+        // Add new URL
+        $used[] = $url;
+
+        // Unique
+        $used = array_unique( $used );
+
+        // Trim to last 200 (prevents bloat)
+        if ( count( $used ) > 200 ) {
+            $used = array_slice( $used, -200 );
+        }
+
+        update_option( '_aab_used_images', $used, false ); // autoload=no
     }
 
     private static function fetch_unsplash( $api_key, $query, $count ) {
         if ( empty( $api_key ) ) return new WP_Error( 'missing_key', 'Unsplash API Key missing.' );
 
         $url = "https://api.unsplash.com/search/photos?query=" . urlencode( $query ) . "&per_page=" . $count . "&orientation=landscape";
+
+        // Add random sort order if possible (Unsplash supports 'relevant' or 'latest', not random per se, but we can't easily randomize via API)
+        // We rely on fetching a large batch and picking one client-side.
 
         $response = wp_remote_get( $url, array(
             'headers' => array(

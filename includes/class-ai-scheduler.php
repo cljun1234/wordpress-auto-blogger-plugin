@@ -301,8 +301,15 @@ class AAB_Scheduler {
                 $next_timestamp = $option1->getTimestamp();
             }
         }
+        elseif ( $data['frequency'] === 'weekly' ) {
+            // If passed today, move to next week
+            if ( $target_time <= $now ) {
+                 $target_time->modify( '+1 week' );
+            }
+            $next_timestamp = $target_time->getTimestamp();
+        }
         else {
-             // Daily or Weekly
+             // Daily (Default)
              if ( $target_time <= $now ) {
                  $target_time->modify( '+1 day' );
              }
