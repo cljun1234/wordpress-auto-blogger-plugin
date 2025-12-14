@@ -86,7 +86,7 @@ class AAB_Engine {
             // LOGGING END
 
             // 5. Process Images
-            $this->process_images( $post_id, $keyword, $generated_content, $template_data );
+            $this->process_images( $post_id, $keyword, $template_data, $provider, $model );
 
             return $post_id;
 
@@ -138,10 +138,6 @@ class AAB_Engine {
         if ( ! empty( $data['schema_type'] ) && $data['schema_type'] !== 'Article' ) {
             $prompt .= "\n- Structure the content to support " . $data['schema_type'] . " schema (e.g. if FAQ, use proper Q&A format).";
         }
-
-        // Image Query Instruction
-        $prompt .= "\n\nIMPORTANT: For every <h2> section, suggest a visual stock photo search query. Format it as a hidden comment right after the <h2> tag like this: <h2>Heading Text</h2> <!-- IMAGE_QUERY: A creative search term description -->";
-        $prompt .= "\nEnsure the search term is descriptive but simple (e.g. 'coding laptop neon light' instead of 'best laptop').";
 
         // Tags Instruction
         $prompt .= "\n\nIMPORTANT: At the very end of the content, strictly output a hidden HTML comment containing 3-5 relevant comma-separated tags like this: <!-- TAGS: Tag1, Tag2, Tag3 -->";
@@ -243,19 +239,14 @@ class AAB_Engine {
     /**
      * Handles image fetching, sideloading, and insertion.
      */
-    private function process_images( $post_id, $keyword, $html_content, $data ) {
+    private function process_images( $post_id, $keyword, $data, $provider_ai, $model_ai ) {
         // Check if image provider is selected
         if ( empty( $data['image_provider'] ) || empty( $data['image_count'] ) ) {
             return;
         }
 
-        // FIX: Fetch Cleaned Content from DB instead of using the raw $html_content from AI response.
-        // The raw $html_content contains H1 and Markdown which were stripped in create_wordpress_post.
-        // However, we instructed AI to put IMAGE_QUERY in comments. create_wordpress_post does NOT strip comments.
-        // So the cleaned content in DB *should* still have the comments.
         $post = get_post( $post_id );
         if ( ! $post ) return;
-
         $current_content = $post->post_content;
 
         $provider = $data['image_provider'];
@@ -265,171 +256,182 @@ class AAB_Engine {
 
         AAB_Logger::log( $post_id, "Starting image processing using provider: $provider. Target count: $count", 'info' );
 
-        // 1. Determine Search Queries from Content Markers or Fallback
-        // We need 1 for Featured (optional) + $count for body
-        $search_queries = array();
+        // 1. Segmentation
+        // Split content by paragraphs
+        $paragraphs = explode( '</p>', $current_content );
+        // Filter empty
+        $paragraphs = array_filter( $paragraphs, function($p) { return !empty(trim(strip_tags($p))); } );
+        $paragraphs = array_values( $paragraphs ); // reindex
 
-        // Extract H2s and adjacent comments
-        // Regex looks for <h2>...</h2> followed optionally by whitespace and <!-- IMAGE_QUERY: ... -->
-        preg_match_all( '/<h2[^>]*>(.*?)<\/h2>(?:\s*<!-- IMAGE_QUERY:\s*(.*?)-->)?/is', $current_content, $matches, PREG_SET_ORDER );
-
-        // Featured Image Query (always main keyword)
-        if ( ! has_post_thumbnail( $post_id ) && $set_featured ) {
-            $search_queries[] = array( 'type' => 'featured', 'query' => $keyword );
-        }
-
-        // Body Image Queries
-        for ( $i = 0; $i < $count; $i++ ) {
-            if ( isset( $matches[ $i ] ) ) {
-                // If AI provided a specific query, use it
-                if ( ! empty( $matches[ $i ][2] ) ) {
-                    $q = strip_tags( $matches[ $i ][2] );
-                    // Remove the comment from content (cleanup)
-                    // Note: We will do a global cleanup at the end, but we can also replace it here to ensure we don't match it again.
-                    // But since we are iterating, let's just collect the queries first.
-                } else {
-                    // Fallback to H2 text
-                    $q = strip_tags( $matches[ $i ][1] );
+        $total_p = count( $paragraphs );
+        if ( $total_p < 2 ) {
+            // Not enough content to split, just query keyword
+             // (Fallback logic if content is tiny)
+             $segment_indices = array(0);
+        } else {
+            // Calculate indices for even distribution
+            // e.g. 20 paragraphs, 4 images. Interval = 5. Indices: 4, 9, 14, 19 (insert after) or 0, 5, 10, 15 (insert before)
+            // User requested "break the content approx equal segment".
+            // Let's pick indices "before" which segment starts.
+            $interval = floor( $total_p / max(1, $count) );
+            $segment_indices = array();
+            for ( $i = 0; $i < $count; $i++ ) {
+                $idx = ( $i * $interval );
+                if ( $idx < $total_p ) {
+                    $segment_indices[] = $idx;
                 }
-            } else {
-                 $q = $keyword . ' ' . ( $i + 1 );
             }
-            $search_queries[] = array( 'type' => 'body', 'query' => $q );
         }
 
-        AAB_Logger::log( $post_id, "Generated search queries: " . json_encode( $search_queries ), 'info' );
+        // 2. Extract Contexts
+        $contexts = array();
+        foreach ( $segment_indices as $idx ) {
+            // Get text from this paragraph and maybe the next one
+            $text = strip_tags( $paragraphs[$idx] );
+            if ( isset( $paragraphs[$idx+1] ) ) {
+                $text .= " " . strip_tags( $paragraphs[$idx+1] );
+            }
+            // Truncate
+            $contexts[] = substr( $text, 0, 300 );
+        }
 
-        // 2. Fetch and Insert Images
+        // 3. Generate Queries via AI
+        $post_title = get_the_title( $post_id );
+        $queries = $this->generate_image_queries_from_context( $post_title, $contexts, $provider_ai, $model_ai );
 
-        // Fetch exclusion list (used images)
+        if ( empty( $queries ) || ! isset( $queries['segments'] ) ) {
+             AAB_Logger::log( $post_id, "Failed to generate image queries from AI context.", 'warning' );
+             return;
+        }
+
+        $search_queries = $queries['segments']; // Array of strings matching segments
+        $featured_query = isset( $queries['featured'] ) ? $queries['featured'] : $keyword;
+
+        AAB_Logger::log( $post_id, "Generated search queries: " . json_encode( $queries ), 'info' );
+
+        // 4. Fetch and Insert Images
         $used_images = AAB_Image_Factory::get_used_images();
 
+        // Handle Featured
+        if ( ! has_post_thumbnail( $post_id ) && $set_featured ) {
+             $images = AAB_Image_Factory::get_images( $provider, $featured_query, 20, $used_images );
+             if ( ! empty( $images ) && ! is_wp_error( $images ) ) {
+                 $img_data = $images[0];
+                 AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
+                 $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
+                 if ( ! is_wp_error( $attach_id ) ) {
+                     set_post_thumbnail( $post_id, $attach_id );
+                     if ( $add_attribution ) {
+                        $caption = sprintf( 'Photo by <a href="%s" target="_blank" rel="nofollow">%s</a> on %s',
+                            $img_data['photographer_url'], $img_data['photographer'], ucfirst( $provider ) );
+                        wp_update_post( array( 'ID' => $attach_id, 'post_excerpt' => $caption ) );
+                     }
+                 }
+             }
+        }
+
+        // Handle Body Images
+        // We need to inject images into $current_content at specific locations.
+        // Doing this on the string $current_content is tricky because offsets change as we insert.
+        // Better to rebuild the content from the $paragraphs array.
+
+        $new_content = '';
+
+        // We have $paragraphs array (without </p> closing tags because explode removed them, or maybe it kept them? explode removes separator)
+        // Check explode behavior: explode('</p>', 'a</p>b</p>') -> ['a', 'b', '']
+        // So we need to re-add </p>.
+
+        $p_idx = 0;
         $inserted_count = 0;
 
-        foreach ( $search_queries as $index => $item ) {
-            // Fetch batch of images for this query, excluding used
-            $images = AAB_Image_Factory::get_images( $provider, $item['query'], 20, $used_images ); // Fetch 20 to find a unique one
-
-            if ( is_wp_error( $images ) ) {
-                AAB_Logger::log( $post_id, "Image fetch failed for query '{$item['query']}': " . $images->get_error_message(), 'error' );
-                continue;
-            }
-
-            if ( empty( $images ) ) {
-                AAB_Logger::log( $post_id, "No images found for query '{$item['query']}'", 'warning' );
-                continue;
-            }
-
-            // Pick the first one (factory logic now filters used ones, or gives random if all used)
-            $img_data = $images[0];
-
-            // Mark as used
-            // We use URL or ID depending on provider. For now URL is safest unique identifier across providers without complex ID storage
-            AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
-
-            // Sideload
-            $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
-
-            if ( is_wp_error( $attach_id ) ) {
-                AAB_Logger::log( $post_id, "Sideload failed for url '{$img_data['url']}': " . $attach_id->get_error_message(), 'error' );
-                continue;
-            }
-
-            AAB_Logger::log( $post_id, "Successfully sideloaded image ID: $attach_id for query: " . $item['query'], 'success' );
-
-            // Handle Featured Image
-            if ( $item['type'] === 'featured' ) {
-                set_post_thumbnail( $post_id, $attach_id );
-                if ( $add_attribution ) {
-                    $caption = sprintf( 'Photo by <a href="%s" target="_blank" rel="nofollow">%s</a> on %s',
-                        $img_data['photographer_url'],
-                        $img_data['photographer'],
-                        ucfirst( $provider )
-                    );
-                    $args = array( 'ID' => $attach_id, 'post_excerpt' => $caption );
-                    wp_update_post( $args );
-                }
-            }
-            // Handle Body Images
-            elseif ( $item['type'] === 'body' && $inserted_count < $count ) {
-                $img_url = wp_get_attachment_url( $attach_id );
-                $caption = '';
-                if ( $add_attribution ) {
-                    $caption = sprintf( 'Photo by <a href="%s" target="_blank" rel="nofollow">%s</a> on %s',
-                        $img_data['photographer_url'],
-                        $img_data['photographer'],
-                        ucfirst( $provider )
-                    );
-                }
-
-                // Construct HTML
-                $img_html = '<!-- wp:image {"id":' . $attach_id . ',"sizeSlug":"large","linkDestination":"none"} -->';
-                $img_html .= '<figure class="wp-block-image size-large"><img src="' . esc_url( $img_url ) . '" alt="' . esc_attr( $img_data['alt'] ) . '" class="wp-image-' . $attach_id . '"/>';
-                if ( $caption ) {
-                    $img_html .= '<figcaption>' . $caption . '</figcaption>';
-                }
-                $img_html .= '</figure><!-- /wp:image -->';
-
-                // Insert into content
-
-                $h2_text = $item['query'];
-                // Since we might have replaced the comment, the query in $item might be different from H2 text if AI provided it.
-                // Re-find the H2.
-
-                // Find all H2s again
-                 preg_match_all( '/<h2[^>]*>(.*?)<\/h2>/is', $current_content, $h2_matches, PREG_OFFSET_CAPTURE );
-
-                 if ( isset( $h2_matches[0][$inserted_count] ) ) {
-                     // Insert after this H2
-                     $match_str = $h2_matches[0][$inserted_count][0];
-
-                     // Use specific replacement for Nth occurrence
-                     $current_content = $this->preg_replace_nth( '/<h2[^>]*>.*?<\/h2>/is', $match_str . "\n" . $img_html, $current_content, $inserted_count + 1 );
-
-                 } else {
-                    // Fallback
-                    $p_index = ( $inserted_count + 1 ) * 2;
-                    $current_content = $this->insert_after_paragraph( $img_html, $p_index, $current_content );
-                 }
-
-                $inserted_count++;
+        // Map segment indices to queries
+        // $segment_indices = [0, 5, 10]
+        // $search_queries = ["q1", "q2", "q3"]
+        // Map: 0 => "q1", 5 => "q2"...
+        $index_to_query = array();
+        foreach ( $segment_indices as $k => $idx ) {
+            if ( isset( $search_queries[$k] ) ) {
+                $index_to_query[$idx] = $search_queries[$k];
             }
         }
 
-        // Final Cleanup: Remove any remaining IMAGE_QUERY comments from $current_content
-        $current_content = preg_replace( '/<!-- IMAGE_QUERY:\s*(.*?)-->/i', '', $current_content );
+        foreach ( $paragraphs as $idx => $p_text ) {
+            // Check if we need to insert BEFORE this paragraph
+            if ( isset( $index_to_query[$idx] ) ) {
+                $query = $index_to_query[$idx];
+
+                // Fetch Image
+                $images = AAB_Image_Factory::get_images( $provider, $query, 20, $used_images );
+
+                if ( ! empty( $images ) && ! is_wp_error( $images ) ) {
+                    $img_data = $images[0];
+                    AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
+                    $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
+
+                    if ( ! is_wp_error( $attach_id ) ) {
+                        $img_url = wp_get_attachment_url( $attach_id );
+                        $caption = '';
+                        if ( $add_attribution ) {
+                            $caption = sprintf( 'Photo by <a href="%s" target="_blank" rel="nofollow">%s</a> on %s',
+                                $img_data['photographer_url'], $img_data['photographer'], ucfirst( $provider ) );
+                        }
+
+                        $img_html = '<!-- wp:image {"id":' . $attach_id . ',"sizeSlug":"large","linkDestination":"none"} -->';
+                        $img_html .= '<figure class="wp-block-image size-large"><img src="' . esc_url( $img_url ) . '" alt="' . esc_attr( $img_data['alt'] ) . '" class="wp-image-' . $attach_id . '"/>';
+                        if ( $caption ) {
+                            $img_html .= '<figcaption>' . $caption . '</figcaption>';
+                        }
+                        $img_html .= '</figure><!-- /wp:image -->';
+
+                        $new_content .= "\n" . $img_html . "\n";
+                        $inserted_count++;
+                    }
+                }
+            }
+
+            // Append paragraph (re-add closing tag)
+            $new_content .= $p_text . "</p>";
+        }
 
         // Save updated content
         $update_args = array(
             'ID' => $post_id,
-            'post_content' => $current_content
+            'post_content' => $new_content
         );
         wp_update_post( $update_args );
 
         AAB_Logger::log( $post_id, "Image processing complete. Inserted $inserted_count body images.", 'success' );
     }
 
-    private function insert_after_paragraph( $insertion, $paragraph_id, $content ) {
-        $closing_p = '</p>';
-        $paragraphs = explode( $closing_p, $content );
-        $new_content = '';
+    private function generate_image_queries_from_context( $title, $contexts, $provider, $model ) {
+        // Build Prompt
+        $prompt = "I need stock photo search queries for a blog post titled: '$title'.\n";
+        $prompt .= "I have split the content into segments. Please provide a relevant, visual, non-generic search query (2-5 words) for each segment based on the text provided below.\n";
+        $prompt .= "Also provide one 'featured' query for the main title.\n\n";
 
-        foreach ( $paragraphs as $index => $paragraph ) {
-            if ( trim( $paragraph ) ) {
-                $new_content .= $paragraph . $closing_p;
-            }
-            if ( $paragraph_id == $index + 1 ) {
-                $new_content .= "\n" . $insertion . "\n";
-            }
+        foreach ( $contexts as $i => $text ) {
+            $prompt .= "Segment " . ($i+1) . ": " . $text . "\n\n";
         }
-        return $new_content;
-    }
 
-    private function preg_replace_nth($pattern, $replacement, $subject, $nth=1) {
-        return preg_replace_callback($pattern, function($found) use (&$pattern, &$replacement, &$nth) {
-                $nth--;
-                if ($nth==0) return $replacement;
-                return reset($found);
-        }, $subject, -1, $count);
+        $prompt .= "Return the result as a raw JSON object with keys: 'featured' (string) and 'segments' (array of strings). Do not use Markdown formatting.";
+
+        try {
+            $client = AAB_API_Factory::get_client( $provider );
+            if ( is_wp_error( $client ) ) return array();
+
+            $json_str = $client->generate_content( "You are a helpful assistant.", $prompt, $model );
+
+            // Clean JSON
+            $json_str = str_replace( array('```json', '```'), '', $json_str );
+            $data = json_decode( $json_str, true );
+
+            if ( json_last_error() === JSON_ERROR_NONE && isset( $data['segments'] ) ) {
+                return $data;
+            }
+            return array();
+
+        } catch ( Exception $e ) {
+            return array();
+        }
     }
 }
