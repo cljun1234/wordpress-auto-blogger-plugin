@@ -184,6 +184,12 @@ class AAB_Engine {
             }
         }
 
+        // Generate Slug
+        $slug = sanitize_title( $title );
+        if ( empty( $slug ) ) {
+            $slug = sanitize_title( $keyword );
+        }
+
         // Generate Meta Description
         $meta_desc = '';
         if ( ! empty( $data['meta_desc_formula'] ) ) {
@@ -201,6 +207,7 @@ class AAB_Engine {
         // Create Post
         $post_arr = array(
             'post_title'    => $title,
+            'post_name'     => $slug, // Explicitly set slug
             'post_content'  => $html_content,
             'post_status'   => 'draft',
             'post_author'   => get_current_user_id(),
