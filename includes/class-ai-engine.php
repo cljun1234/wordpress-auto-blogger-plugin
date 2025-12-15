@@ -57,6 +57,9 @@ class AAB_Engine {
             return new WP_Error( 'invalid_template', 'Invalid template data.' );
         }
 
+        // Fetch Categories
+        $categories = wp_get_post_categories( $template_id );
+
         // 2. Construct Prompt
         $system_prompt = $this->build_system_prompt( $template_data );
         $user_prompt = "Write an article about: " . $keyword . ". Return ONLY the HTML content (starting with H1).";
@@ -75,7 +78,7 @@ class AAB_Engine {
             }
 
             // 4. Create Post
-            $post_id = $this->create_wordpress_post( $keyword, $generated_content, $template_data );
+            $post_id = $this->create_wordpress_post( $keyword, $generated_content, $template_data, $categories );
 
             if ( is_wp_error( $post_id ) ) {
                  return $post_id;
@@ -144,14 +147,28 @@ class AAB_Engine {
         }
 
         // Tags Instruction
-        $prompt .= "\n\nIMPORTANT: At the very end of the content, strictly output a hidden HTML comment containing 3-5 relevant comma-separated tags like this: <!-- TAGS: Tag1, Tag2, Tag3 -->";
+        $all_tags = get_tags( array( 'hide_empty' => false ) );
+        $tag_names = wp_list_pluck( $all_tags, 'name' );
+        // Limit to top 200 to avoid token limits if list is huge
+        $tag_names = array_slice( $tag_names, 0, 200 );
+        $tags_list = implode( ', ', $tag_names );
+
+        $prompt .= "\n\nIMPORTANT: Tagging Instructions:";
+        if ( ! empty( $tags_list ) ) {
+            $prompt .= "\n- Existing Site Tags: " . $tags_list;
+            $prompt .= "\n- Prioritize selecting relevant tags from the 'Existing Site Tags' list.";
+            $prompt .= "\n- If you select fewer than 5 existing tags, generate new unique relevant tags to reach a total of 5 tags.";
+        } else {
+             $prompt .= "\n- Generate 3-5 relevant tags.";
+        }
+        $prompt .= "\n- Strictly output the final list in a hidden HTML comment at the very end of content like this: <!-- TAGS: Tag1, Tag2, Tag3 -->";
 
         $prompt .= "\n\nIMPORTANT: Return ONLY the raw HTML content for the body of the post. Do not include markdown code blocks (```html). Start directly with the <h1> tag.";
 
         return $prompt;
     }
 
-    private function create_wordpress_post( $keyword, $html_content, $data ) {
+    private function create_wordpress_post( $keyword, $html_content, $data, $categories = array() ) {
 
         // Cleanup Markdown if AI adds it
         $html_content = preg_replace( '/^```html/', '', $html_content );
@@ -212,6 +229,7 @@ class AAB_Engine {
             'post_status'   => 'draft',
             'post_author'   => get_current_user_id(),
             'post_type'     => 'post',
+            'post_category' => $categories, // Set categories
         );
 
         // If running via Cron, current user might be 0. Set to admin (ID 1) or keep 0 (if valid).
