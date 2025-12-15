@@ -29,6 +29,7 @@ class AAB_Templates {
             'label'                 => __( 'Template', 'ai-auto-blogger' ),
             'labels'                => $labels,
             'supports'              => array( 'title' ), // Only title, other data is meta
+            'taxonomies'            => array( 'category' ), // Enable Categories
             'hierarchical'          => false,
             'public'                => false,
             'show_ui'               => true,
