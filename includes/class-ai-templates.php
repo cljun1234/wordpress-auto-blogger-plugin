@@ -44,6 +44,7 @@ class AAB_Templates {
             'capability_type'       => 'post',
         );
         register_post_type( 'ai_template', $args );
+        register_taxonomy_for_object_type( 'category', 'ai_template' );
     }
 
     public function add_meta_boxes() {
