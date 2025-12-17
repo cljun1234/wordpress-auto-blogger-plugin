@@ -17,51 +17,97 @@ class AAB_Image_Factory {
     public static function get_images( $provider, $query, $count = 1, $exclude_urls = array() ) {
         $settings = get_option( 'aab_settings' );
 
-        // If we have exclusion list, we need to fetch more images to be safe
-        $fetch_limit = ! empty( $exclude_urls ) ? max( 30, $count * 5 ) : $count;
+        // Determine available providers
+        $available_providers = array();
+        if ( ! empty( $settings['unsplash_access_key'] ) ) $available_providers[] = 'unsplash';
+        if ( ! empty( $settings['pexels_api_key'] ) ) $available_providers[] = 'pexels';
+        if ( ! empty( $settings['pixabay_api_key'] ) ) $available_providers[] = 'pixabay';
 
-        switch ( $provider ) {
-            case 'unsplash':
-                $api_key = isset( $settings['unsplash_access_key'] ) ? $settings['unsplash_access_key'] : '';
-                $results = self::fetch_unsplash( $api_key, $query, $fetch_limit );
-                break;
-            case 'pexels':
-                $api_key = isset( $settings['pexels_api_key'] ) ? $settings['pexels_api_key'] : '';
-                $results = self::fetch_pexels( $api_key, $query, $fetch_limit );
-                break;
-            case 'pixabay':
-                $api_key = isset( $settings['pixabay_api_key'] ) ? $settings['pixabay_api_key'] : '';
-                $results = self::fetch_pixabay( $api_key, $query, $fetch_limit );
-                break;
-            default:
-                return new WP_Error( 'invalid_provider', 'Invalid image provider.' );
+        // Add requested provider if not in list (might be user error, but keep it to attempt)
+        if ( ! in_array( $provider, $available_providers ) && ! empty( $provider ) ) {
+            $available_providers[] = $provider;
         }
 
-        if ( is_wp_error( $results ) ) {
-            return $results;
-        }
+        $collected_images = array();
+        $attempts = 0;
+        $max_attempts = 3; // Try up to 3 times with different strategies
 
-        // Filter out excluded URLs
-        // Note: Comparing full URLs is strict. Some APIs rotate URLs or change tokens.
-        // Ideally we would use Image ID, but standardizing IDs across 3 APIs is complex for this factory.
-        // We will rely on URL string matching.
-        $filtered = array();
-        foreach ( $results as $img ) {
-            // Check against exclude list
-            if ( in_array( $img['url'], $exclude_urls ) ) {
+        // Loop to attempt fetching unique images
+        while ( count( $collected_images ) < $count && $attempts < $max_attempts ) {
+            $attempts++;
+
+            // Strategy:
+            // Attempt 1: Requested Provider + Random Page (1-5)
+            // Attempt 2: Random Provider (if multiple) + Random Page (1-10)
+            // Attempt 3: Requested Provider + Page 1 (Fallback)
+
+            $current_provider = $provider;
+            $page = rand( 1, 5 );
+
+            if ( $attempts === 2 && count( $available_providers ) > 1 ) {
+                // Pick a different provider if available
+                $others = array_diff( $available_providers, array( $provider ) );
+                if ( ! empty( $others ) ) {
+                    $current_provider = $others[ array_rand( $others ) ];
+                }
+                $page = rand( 1, 10 );
+            } elseif ( $attempts === 3 ) {
+                $current_provider = $provider;
+                $page = 1; // Last resort
+            }
+
+            // Fetch limit: ensure we get enough candidates
+            $fetch_limit = max( 20, $count * 3 );
+
+            $results = array();
+            switch ( $current_provider ) {
+                case 'unsplash':
+                    $api_key = isset( $settings['unsplash_access_key'] ) ? $settings['unsplash_access_key'] : '';
+                    $results = self::fetch_unsplash( $api_key, $query, $fetch_limit, $page );
+                    break;
+                case 'pexels':
+                    $api_key = isset( $settings['pexels_api_key'] ) ? $settings['pexels_api_key'] : '';
+                    $results = self::fetch_pexels( $api_key, $query, $fetch_limit, $page );
+                    break;
+                case 'pixabay':
+                    $api_key = isset( $settings['pixabay_api_key'] ) ? $settings['pixabay_api_key'] : '';
+                    $results = self::fetch_pixabay( $api_key, $query, $fetch_limit, $page );
+                    break;
+            }
+
+            if ( is_wp_error( $results ) ) {
                 continue;
             }
-            $filtered[] = $img;
+
+            // Filter and Collect
+            foreach ( $results as $img ) {
+                // Check Global Exclude List
+                if ( in_array( $img['url'], $exclude_urls ) ) {
+                    continue;
+                }
+                // Check if already in collected (prevent duplicates in this batch)
+                $already_collected = false;
+                foreach ( $collected_images as $c ) {
+                    if ( $c['url'] === $img['url'] ) $already_collected = true;
+                }
+                if ( $already_collected ) {
+                    continue;
+                }
+
+                $collected_images[] = $img;
+                if ( count( $collected_images ) >= $count ) {
+                    break; // We have enough
+                }
+            }
         }
 
-        // If we filtered everything (unlikely with fetch_limit 30), fallback to original results shuffled
-        if ( empty( $filtered ) ) {
-            $filtered = $results;
-            shuffle( $filtered );
+        // Final Fallback: If we still have 0 images, return error or empty.
+        // If we have some but not enough, just return what we have.
+        if ( empty( $collected_images ) ) {
+            return new WP_Error( 'no_images', 'Could not find unique images after multiple attempts.' );
         }
 
-        // Return just the requested count
-        return array_slice( $filtered, 0, $count );
+        return array_slice( $collected_images, 0, $count );
     }
 
     /**
@@ -95,10 +141,10 @@ class AAB_Image_Factory {
         update_option( '_aab_used_images', $used, false ); // autoload=no
     }
 
-    private static function fetch_unsplash( $api_key, $query, $count ) {
+    private static function fetch_unsplash( $api_key, $query, $count, $page = 1 ) {
         if ( empty( $api_key ) ) return new WP_Error( 'missing_key', 'Unsplash API Key missing.' );
 
-        $url = "https://api.unsplash.com/search/photos?query=" . urlencode( $query ) . "&per_page=" . $count . "&orientation=landscape";
+        $url = "https://api.unsplash.com/search/photos?query=" . urlencode( $query ) . "&per_page=" . $count . "&page=" . $page . "&orientation=landscape";
 
         // Add random sort order if possible (Unsplash supports 'relevant' or 'latest', not random per se, but we can't easily randomize via API)
         // We rely on fetching a large batch and picking one client-side.
@@ -133,10 +179,10 @@ class AAB_Image_Factory {
         return $images;
     }
 
-    private static function fetch_pexels( $api_key, $query, $count ) {
+    private static function fetch_pexels( $api_key, $query, $count, $page = 1 ) {
         if ( empty( $api_key ) ) return new WP_Error( 'missing_key', 'Pexels API Key missing.' );
 
-        $url = "https://api.pexels.com/v1/search?query=" . urlencode( $query ) . "&per_page=" . $count . "&orientation=landscape";
+        $url = "https://api.pexels.com/v1/search?query=" . urlencode( $query ) . "&per_page=" . $count . "&page=" . $page . "&orientation=landscape";
 
         $response = wp_remote_get( $url, array(
             'headers' => array(
@@ -168,10 +214,10 @@ class AAB_Image_Factory {
         return $images;
     }
 
-    private static function fetch_pixabay( $api_key, $query, $count ) {
+    private static function fetch_pixabay( $api_key, $query, $count, $page = 1 ) {
         if ( empty( $api_key ) ) return new WP_Error( 'missing_key', 'Pixabay API Key missing.' );
 
-        $url = "https://pixabay.com/api/?key=" . $api_key . "&q=" . urlencode( $query ) . "&image_type=photo&per_page=" . $count . "&orientation=horizontal";
+        $url = "https://pixabay.com/api/?key=" . $api_key . "&q=" . urlencode( $query ) . "&image_type=photo&per_page=" . $count . "&page=" . $page . "&orientation=horizontal";
 
         $response = wp_remote_get( $url );
 
