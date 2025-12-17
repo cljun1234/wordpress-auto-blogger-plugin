@@ -319,11 +319,19 @@ class AAB_Engine {
         $queries = $this->generate_image_queries_from_context( $post_title, $contexts, $provider_ai, $model_ai );
 
         // Handle Featured separately (always keyword or title-based)
-        $this->handle_featured_image( $post_id, $data, $queries['featured'] ?? $keyword );
+        $featured_img_url = $this->handle_featured_image( $post_id, $data, $queries['featured'] ?? $keyword );
 
         // Handle Replacements
         $search_queries = $queries['segments'] ?? array();
+
+        // Retrieve global used images
         $used_images = AAB_Image_Factory::get_used_images();
+
+        // Add locally used featured image to exclusion list for this run
+        if ( $featured_img_url ) {
+            $used_images[] = $featured_img_url;
+        }
+
         $provider = $data['image_provider'];
         $add_attribution = isset( $data['image_attribution'] ) && $data['image_attribution'] === 'yes';
 
@@ -331,18 +339,22 @@ class AAB_Engine {
         // We rely on preg_replace_callback or simpler explode/implode.
         // Let's use a counter.
 
-        $new_content = preg_replace_callback( '/<!-- AAB_IMAGE_PLACEHOLDER -->/', function($matches) use (&$search_queries, $provider, $used_images, $post_id, $add_attribution) {
+        $new_content = preg_replace_callback( '/<!-- AAB_IMAGE_PLACEHOLDER -->/', function($matches) use (&$search_queries, $provider, &$used_images, $post_id, $add_attribution) {
 
             // Get next query
             $query = array_shift( $search_queries );
             if ( empty( $query ) ) return ''; // No query? remove marker.
 
-            // Fetch Image
-            $images = AAB_Image_Factory::get_images( $provider, $query, 20, $used_images );
+            // Fetch Image - Pass updated used_images to ensure uniqueness within this post
+            $images = AAB_Image_Factory::get_images( $provider, $query, 1, $used_images );
             if ( empty( $images ) || is_wp_error( $images ) ) return '';
 
             $img_data = $images[0];
             AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
+
+            // Add to local exclusion list for next iterations in this loop
+            $used_images[] = $img_data['url'];
+
             $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
 
             if ( is_wp_error( $attach_id ) ) return '';
@@ -411,7 +423,7 @@ class AAB_Engine {
         $queries = $this->generate_image_queries_from_context( $post_title, $contexts, $provider_ai, $model_ai );
 
         // Handle Featured
-        $this->handle_featured_image( $post_id, $data, $queries['featured'] ?? $keyword );
+        $featured_img_url = $this->handle_featured_image( $post_id, $data, $queries['featured'] ?? $keyword );
 
         if ( empty( $queries ) || ! isset( $queries['segments'] ) ) {
              return;
@@ -419,6 +431,11 @@ class AAB_Engine {
 
         $search_queries = $queries['segments'];
         $used_images = AAB_Image_Factory::get_used_images();
+
+        // Add featured image to exclusion
+        if ( $featured_img_url ) {
+            $used_images[] = $featured_img_url;
+        }
 
         // 4. Rebuild Content
         $new_content = '';
@@ -433,11 +450,17 @@ class AAB_Engine {
         foreach ( $paragraphs as $idx => $p_text ) {
             if ( isset( $index_to_query[$idx] ) ) {
                 $query = $index_to_query[$idx];
-                $images = AAB_Image_Factory::get_images( $provider, $query, 20, $used_images );
+
+                // Fetch Image with current exclusions
+                $images = AAB_Image_Factory::get_images( $provider, $query, 1, $used_images );
 
                 if ( ! empty( $images ) && ! is_wp_error( $images ) ) {
                     $img_data = $images[0];
                     AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
+
+                    // Add to local exclusion
+                    $used_images[] = $img_data['url'];
+
                     $attach_id = AAB_Image_Factory::sideload_image( $img_data['url'], $post_id, $img_data['alt'] );
 
                     if ( ! is_wp_error( $attach_id ) ) {
@@ -470,7 +493,7 @@ class AAB_Engine {
     private function handle_featured_image( $post_id, $data, $query ) {
         if ( ! has_post_thumbnail( $post_id ) && isset( $data['image_featured'] ) && $data['image_featured'] === 'yes' ) {
              $used_images = AAB_Image_Factory::get_used_images();
-             $images = AAB_Image_Factory::get_images( $data['image_provider'], $query, 20, $used_images );
+             $images = AAB_Image_Factory::get_images( $data['image_provider'], $query, 1, $used_images ); // Fetch 1
              if ( ! empty( $images ) && ! is_wp_error( $images ) ) {
                  $img_data = $images[0];
                  AAB_Image_Factory::mark_image_as_used( $img_data['url'] );
@@ -482,9 +505,11 @@ class AAB_Engine {
                             $img_data['photographer_url'], $img_data['photographer'], ucfirst( $data['image_provider'] ) );
                         wp_update_post( array( 'ID' => $attach_id, 'post_excerpt' => $caption ) );
                      }
+                     return $img_data['url']; // Return URL for exclusion
                  }
              }
         }
+        return false;
     }
 
     private function generate_image_queries_from_context( $title, $contexts, $provider, $model ) {
