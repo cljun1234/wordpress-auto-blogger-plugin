@@ -21,6 +21,9 @@ class AAB_Scheduler {
 
         // AJAX for Generating Topics
         add_action( 'wp_ajax_aab_generate_topics', array( $this, 'ajax_generate_topics' ) );
+
+        // Admin Post action for removing tasks
+        add_action( 'admin_post_aab_remove_task', array( $this, 'handle_remove_task_request' ) );
     }
 
     public function register_cpt() {
@@ -82,6 +85,30 @@ class AAB_Scheduler {
         } else {
             echo '<div class="wrap"><p>Error: Tasks List class not found.</p></div>';
         }
+    }
+
+    public function handle_remove_task_request() {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( 'Unauthorized.' );
+        }
+
+        check_admin_referer( 'aab_remove_task_nonce' );
+
+        $sched_id = isset( $_GET['id'] ) ? intval( $_GET['id'] ) : 0;
+        $index = isset( $_GET['index'] ) ? intval( $_GET['index'] ) : -1;
+
+        if ( $sched_id > 0 && $index >= 0 ) {
+            $queue = get_post_meta( $sched_id, '_aab_queue', true );
+            if ( is_array( $queue ) && isset( $queue[ $index ] ) ) {
+                unset( $queue[ $index ] );
+                // Re-index array
+                $queue = array_values( $queue );
+                update_post_meta( $sched_id, '_aab_queue', $queue );
+            }
+        }
+
+        wp_redirect( admin_url( 'admin.php?page=aab-show-tasks' ) );
+        exit;
     }
 
     public function enqueue_scripts( $hook ) {

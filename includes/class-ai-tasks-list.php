@@ -15,6 +15,9 @@ class AAB_Tasks_List {
         ?>
         <div class="wrap">
             <h1 class="wp-heading-inline">Upcoming Tasks</h1>
+            <p>
+                <strong>Current System Time:</strong> <?php echo current_time( 'Y-m-d H:i:s' ); ?>
+            </p>
             <p class="description">A projection of upcoming blog posts based on active schedules.</p>
 
             <table class="wp-list-table widefat fixed striped table-view-list">
@@ -24,12 +27,13 @@ class AAB_Tasks_List {
                         <th scope="col" class="manage-column">Schedule Name</th>
                         <th scope="col" class="manage-column">Execution Time</th>
                         <th scope="col" class="manage-column">Timezone</th>
+                        <th scope="col" class="manage-column">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if ( empty( $tasks ) ) : ?>
                         <tr>
-                            <td colspan="4">No active schedules or upcoming tasks found.</td>
+                            <td colspan="5">No active schedules or upcoming tasks found.</td>
                         </tr>
                     <?php else : ?>
                         <?php foreach ( $tasks as $task ) : ?>
@@ -50,6 +54,17 @@ class AAB_Tasks_List {
                                 </td>
                                 <td data-colname="Timezone">
                                     <?php echo esc_html( $task['timezone'] ); ?>
+                                </td>
+                                <td data-colname="Actions">
+                                    <?php if ( ! $task['is_projected'] && isset( $task['queue_index'] ) ) : ?>
+                                        <?php
+                                        $remove_url = wp_nonce_url(
+                                            admin_url( 'admin-post.php?action=aab_remove_task&id=' . $task['schedule_id'] . '&index=' . $task['queue_index'] ),
+                                            'aab_remove_task_nonce'
+                                        );
+                                        ?>
+                                        <a href="<?php echo esc_url( $remove_url ); ?>" class="button button-small" onclick="return confirm('Are you sure you want to remove this topic from the queue?');">Remove</a>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -109,14 +124,15 @@ class AAB_Tasks_List {
 
             if ( $mode === 'manual' ) {
                 // Iterate through queue
-                foreach ( $queue as $topic ) {
+                foreach ( $queue as $index => $topic ) {
                     $tasks[] = array(
                         'title' => $topic,
                         'schedule_name' => $sched->post_title,
                         'schedule_id' => $sched->ID,
                         'timestamp' => $current_run_time,
                         'timezone' => $tz_string,
-                        'is_projected' => false
+                        'is_projected' => false,
+                        'queue_index' => $index // Pass index for removal
                     );
 
                     // Calculate next time for the *next* item
@@ -124,14 +140,15 @@ class AAB_Tasks_List {
                 }
             } elseif ( $mode === 'infinite' ) {
                 // If queue exists, drain it first
-                foreach ( $queue as $topic ) {
+                foreach ( $queue as $index => $topic ) {
                     $tasks[] = array(
                         'title' => $topic,
                         'schedule_name' => $sched->post_title,
                         'schedule_id' => $sched->ID,
                         'timestamp' => $current_run_time,
                         'timezone' => $tz_string,
-                        'is_projected' => false
+                        'is_projected' => false,
+                        'queue_index' => $index // Pass index for removal
                     );
                     $current_run_time = self::calculate_next_time( $current_run_time, $frequency );
                 }
