@@ -159,7 +159,8 @@ class AAB_Templates {
             <!-- Internal Links -->
              <h3>5. Linking</h3>
              <div class="aab-row">
-                <label>Internal Link Targets (URL per line, AI will try to match context)</label>
+                <label>Internal Link Targets (One per line)</label>
+                <p style="margin-top:0; font-size: 12px; color: #666;">Format: <code>URL</code> or <code>URL | Anchor Text Context</code></p>
                 <textarea name="aab_data[internal_links]" rows="3"><?php echo esc_textarea( $data['internal_links'] ); ?></textarea>
             </div>
 

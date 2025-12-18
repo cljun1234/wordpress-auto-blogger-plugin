@@ -96,9 +96,24 @@ class AAB_Engine {
         $prompt .= "\n- Include the keyword naturally in the H1, introduction, and at least one H2.";
         $prompt .= "\n- Add a 'Key Takeaways' table or list if appropriate.";
 
-        // Internal Links (Mock Context)
+        // Internal Links
         if ( ! empty( $data['internal_links'] ) ) {
-             $prompt .= "\n- Suggest placements for these internal links if relevant (format as <a href='URL'>Anchor</a>): \n" . $data['internal_links'];
+            $links_array = explode( "\n", $data['internal_links'] );
+            $formatted_links = "";
+            foreach ( $links_array as $link_line ) {
+                $parts = explode( '|', $link_line );
+                $url = trim( $parts[0] );
+                $context = isset( $parts[1] ) ? trim( $parts[1] ) : 'Context to be determined by AI';
+                if ( ! empty( $url ) ) {
+                    $formatted_links .= "- URL: $url (Anchor/Context: $context)\n";
+                }
+            }
+
+            if ( ! empty( $formatted_links ) ) {
+                 $prompt .= "\n- Internal Linking Instructions:\n";
+                 $prompt .= "  Integrate the following internal links naturally into the content. Use the provided Anchor/Context to determine the best placement and anchor text.\n";
+                 $prompt .= $formatted_links;
+            }
         }
 
         // Schema (Just instruction for now, as full JSON-LD is complex to inline in content usually handled by plugins)
