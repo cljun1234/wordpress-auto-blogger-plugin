@@ -46,5 +46,9 @@ add_action( 'plugins_loaded', 'aab_init' );
 // Activation Hook
 register_activation_hook( __FILE__, 'aab_activate' );
 function aab_activate() {
-    // Flush rewrite rules if we register CPTs on activation (though we do it on init)
+    // Register CPTs manually for activation to ensure rewrite rules are flushed correctly
+    $templates = new AAB_Templates();
+    $templates->register_cpt();
+
+    flush_rewrite_rules();
 }
