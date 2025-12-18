@@ -65,6 +65,23 @@ class AAB_Scheduler {
             'manage_options',
             'edit.php?post_type=ai_schedule'
         );
+
+        add_submenu_page(
+            'ai-auto-blogger',
+            'Show Tasks', // Page Title
+            'Show Tasks', // Menu Title
+            'manage_options',
+            'aab-show-tasks', // Slug
+            array( $this, 'render_tasks_page' ) // Callback
+        );
+    }
+
+    public function render_tasks_page() {
+        if ( class_exists( 'AAB_Tasks_List' ) ) {
+            AAB_Tasks_List::render();
+        } else {
+            echo '<div class="wrap"><p>Error: Tasks List class not found.</p></div>';
+        }
     }
 
     public function enqueue_scripts( $hook ) {
@@ -254,8 +271,9 @@ class AAB_Scheduler {
             update_post_meta( $post_id, '_aab_schedule_config', $data );
 
             // Calculate Next Run if not set or status changed to active
-            $current_next = get_post_meta( $post_id, '_aab_next_run', true );
-            if ( ! $current_next && $data['status'] === 'active' ) {
+            // OR if the user manually saved settings, we should re-calculate to ensure new time/frequency applies immediately.
+            // We always recalculate if status is active to pick up time changes.
+            if ( $data['status'] === 'active' ) {
                 $this->schedule_next_run( $post_id, $data );
             }
         }
