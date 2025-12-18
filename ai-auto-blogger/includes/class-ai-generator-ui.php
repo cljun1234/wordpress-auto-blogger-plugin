@@ -42,7 +42,7 @@ class AAB_Generator_UI {
         $templates = get_posts( array(
             'post_type' => 'ai_template',
             'numberposts' => -1,
-            'post_status' => 'any' // CPT is hidden/draft usually? Let's assume 'publish' or 'draft'
+            'post_status' => 'publish',
         ) );
 
         ?>
