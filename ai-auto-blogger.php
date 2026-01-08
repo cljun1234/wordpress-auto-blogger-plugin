@@ -23,6 +23,7 @@ require_once AAB_PATH . 'includes/class-ai-settings.php';
 require_once AAB_PATH . 'includes/class-ai-templates.php';
 require_once AAB_PATH . 'includes/class-ai-generator-ui.php';
 require_once AAB_PATH . 'includes/class-ai-engine.php';
+require_once AAB_PATH . 'includes/class-ai-tasks-list.php';
 require_once AAB_PATH . 'includes/class-ai-scheduler.php';
 
 // Include API Classes
