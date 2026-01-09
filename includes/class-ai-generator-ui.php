@@ -3,6 +3,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Class AAB_Generator_UI
+ *
+ * Handles the main generator page interface.
+ */
 class AAB_Generator_UI {
 
     public function __construct() {
