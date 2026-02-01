@@ -29,6 +29,7 @@ class AAB_Templates {
             'label'                 => __( 'Template', 'ai-auto-blogger' ),
             'labels'                => $labels,
             'supports'              => array( 'title' ), // Only title, other data is meta
+            'taxonomies'            => array( 'category' ), // Enable Categories
             'hierarchical'          => false,
             'public'                => false,
             'show_ui'               => true,
@@ -43,6 +44,7 @@ class AAB_Templates {
             'capability_type'       => 'post',
         );
         register_post_type( 'ai_template', $args );
+        register_taxonomy_for_object_type( 'category', 'ai_template' );
     }
 
     public function add_meta_boxes() {
