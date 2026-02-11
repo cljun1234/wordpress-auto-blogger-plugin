@@ -23,6 +23,7 @@ require_once AAB_PATH . 'includes/class-ai-settings.php';
 require_once AAB_PATH . 'includes/class-ai-templates.php';
 require_once AAB_PATH . 'includes/class-ai-generator-ui.php';
 require_once AAB_PATH . 'includes/class-ai-engine.php';
+require_once AAB_PATH . 'includes/class-ai-frontend.php';
 
 // Include API Classes
 require_once AAB_PATH . 'includes/api/class-api-factory.php';
@@ -40,6 +41,11 @@ function aab_init() {
 	new AAB_Settings();
 	new AAB_Templates();
 	new AAB_Engine();
+
+    // Instantiate Frontend (only if not admin or DOING_AJAX not set)
+    if ( ! is_admin() ) {
+        new AAB_Frontend();
+    }
 }
 add_action( 'plugins_loaded', 'aab_init' );
 

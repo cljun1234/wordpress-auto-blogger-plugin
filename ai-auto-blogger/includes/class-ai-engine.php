@@ -42,14 +42,30 @@ class AAB_Engine {
                 wp_send_json_error( $client->get_error_message() );
             }
 
+            // A. Generate Content
             $generated_content = $client->generate_content( $system_prompt, $user_prompt, $model );
 
             if ( is_wp_error( $generated_content ) ) {
                 wp_send_json_error( $generated_content->get_error_message() );
             }
 
+            // B. Generate Schema (JSON-LD) if requested
+            $schema_json = '';
+            if ( ! empty( $template_data['schema_type'] ) && $template_data['schema_type'] !== 'Article' ) {
+                // Determine schema type (default to Article if not specified)
+                $schema_type = $template_data['schema_type'];
+                $schema_json = $this->generate_schema_json( $generated_content, $schema_type, $client, $model );
+
+                if ( is_wp_error( $schema_json ) ) {
+                     // Log error but proceed with post creation (or maybe fail?)
+                     // For now, let's just log it and proceed without schema
+                     error_log( 'Schema Generation Failed: ' . $schema_json->get_error_message() );
+                     $schema_json = '';
+                }
+            }
+
             // 4. Create Post
-            $post_id = $this->create_wordpress_post( $keyword, $generated_content, $template_data );
+            $post_id = $this->create_wordpress_post( $keyword, $generated_content, $template_data, $schema_json );
 
             if ( is_wp_error( $post_id ) ) {
                  wp_send_json_error( $post_id->get_error_message() );
@@ -116,7 +132,7 @@ class AAB_Engine {
             }
         }
 
-        // Schema (Just instruction for now, as full JSON-LD is complex to inline in content usually handled by plugins)
+        // Schema Instruction
         if ( ! empty( $data['schema_type'] ) && $data['schema_type'] !== 'Article' ) {
             $prompt .= "\n- Structure the content to support " . $data['schema_type'] . " schema (e.g. if FAQ, use proper Q&A format).";
         }
@@ -126,7 +142,23 @@ class AAB_Engine {
         return $prompt;
     }
 
-    private function create_wordpress_post( $keyword, $html_content, $data ) {
+    private function generate_schema_json( $content, $schema_type, $client, $model ) {
+        $system_prompt = "You are an expert SEO technical specialist. Your task is to generate valid JSON-LD Schema markup based on the provided HTML content.";
+        $user_prompt = "Generate full, valid JSON-LD schema markup for a '" . $schema_type . "' based on the following article content:\n\n" . strip_tags( substr( $content, 0, 5000 ) ) . "\n\nRETURN ONLY THE JSON. No markdown blocks.";
+
+        $json = $client->generate_content( $system_prompt, $user_prompt, $model );
+
+        // Basic cleanup
+        if ( ! is_wp_error( $json ) ) {
+             $json = preg_replace( '/^```json/', '', $json );
+             $json = preg_replace( '/```$/', '', $json );
+             $json = trim( $json );
+        }
+
+        return $json;
+    }
+
+    private function create_wordpress_post( $keyword, $html_content, $data, $schema_json = '' ) {
 
         // Cleanup Markdown if AI adds it
         $html_content = preg_replace( '/^```html/', '', $html_content );
@@ -182,6 +214,10 @@ class AAB_Engine {
         // Save Custom Fields (SEO)
         update_post_meta( $post_id, '_ai_meta_description', $meta_desc );
         update_post_meta( $post_id, '_ai_generated_keyword', $keyword );
+
+        if ( ! empty( $schema_json ) ) {
+            update_post_meta( $post_id, '_aab_schema_json', $schema_json );
+        }
 
         // If Yoast is active, try to save to Yoast fields
         update_post_meta( $post_id, '_yoast_wpseo_title', $title );
